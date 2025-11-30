@@ -268,6 +268,9 @@ static void mark_range_dirty(int start_line, int end_line) {
     }
 }
 
+// External function declarations
+extern "C" void superterminal_update_cursor_position(int line, int col);
+
 // Forward declarations
 void editor_set_database_metadata(const char* script_name, const char* version, const char* author);
 static void editor_update_buffer();
@@ -1477,6 +1480,9 @@ void editor_update(void) {
         return;
     }
     
+    // Update status bar with cursor position
+    superterminal_update_cursor_position(g_editor.cursor_y + 1, g_editor.cursor_x + 1);
+    
     // Check if text grid dimensions have changed (window resize or mode switch)
     int current_columns, current_rows;
     text_grid_get_dimensions(&current_columns, &current_rows);
@@ -2083,6 +2089,24 @@ const char* editor_get_filename(void) {
         return "untitled.lua";
     }
     return g_editor.current_filename.c_str();
+}
+
+void editor_jump_to_line(int line_number) {
+    if (line_number > 0 && line_number <= (int)g_editor.lines.size()) {
+        g_editor.cursor_y = line_number - 1; // Convert to 0-based
+        g_editor.cursor_x = 0;
+        
+        // Ensure editor is active
+        if (!g_editor.active) {
+            editor_toggle_impl();
+        }
+        
+        // Scroll to make line visible
+        editor_scroll_if_needed();
+        editor_set_status(("Jumped to line " + std::to_string(line_number)).c_str());
+    } else {
+        std::cerr << "TextEditor: Invalid line number: " << line_number << std::endl;
+    }
 }
 
 } // extern "C"

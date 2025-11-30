@@ -112,6 +112,172 @@ extern "C" {
 
     // Force shutdown function
     void superterminal_force_shutdown(void);
+
+    // Editor jump to line function
+    void editor_jump_to_line(int line_number);
+
+    // Status bar update functions
+    void superterminal_update_status(const char* status);
+    void superterminal_update_cursor_position(int line, int col);
+    void superterminal_update_script_name(const char* scriptName);
+
+    // Graphics function
+    void graphics_swap(void);
+}
+
+// Helper function to extract line number from Lua error message
+static int extract_line_number_from_error(const char* error_msg) {
+    if (!error_msg) return -1;
+
+    // Lua error format: "[string ...]:<line>: <error message>"
+    // Or: "Lua Load Error: [string ...]:<line>: <error message>"
+    std::string error_str(error_msg);
+
+    // Find the pattern ":<number>:"
+    size_t colon_pos = error_str.find(":");
+    while (colon_pos != std::string::npos) {
+        size_t next_colon = error_str.find(":", colon_pos + 1);
+        if (next_colon != std::string::npos) {
+            std::string between = error_str.substr(colon_pos + 1, next_colon - colon_pos - 1);
+            // Check if this is a number
+            bool all_digits = !between.empty();
+            for (char c : between) {
+                if (!isdigit(c) && c != ' ') {
+                    all_digits = false;
+                    break;
+                }
+            }
+            if (all_digits) {
+                return atoi(between.c_str());
+            }
+        }
+        colon_pos = error_str.find(":", colon_pos + 1);
+    }
+
+    return -1;
+}
+
+// Helper function to clean up Lua error message for display
+static std::string clean_lua_error_message(const char* error_msg) {
+    if (!error_msg) return "Unknown error";
+
+    std::string error_str(error_msg);
+
+    // Remove "Lua Load Error: " prefix if present
+    size_t lua_prefix = error_str.find("Lua Load Error: ");
+    if (lua_prefix == 0) {
+        error_str = error_str.substr(16);
+    }
+
+    // Remove "Lua Error: " prefix if present
+    lua_prefix = error_str.find("Lua Error: ");
+    if (lua_prefix == 0) {
+        error_str = error_str.substr(11);
+    }
+
+    // Find and remove [string "..."] pattern
+    size_t bracket_start = error_str.find("[string");
+    if (bracket_start != std::string::npos) {
+        size_t bracket_end = error_str.find("]", bracket_start);
+        if (bracket_end != std::string::npos) {
+            // Find the line number after the bracket
+            size_t colon_pos = error_str.find(":", bracket_end);
+            if (colon_pos != std::string::npos) {
+                size_t next_colon = error_str.find(":", colon_pos + 1);
+                if (next_colon != std::string::npos) {
+                    // Extract just the error message after ":<line>: "
+                    error_str = error_str.substr(next_colon + 2);
+                }
+            }
+        }
+    }
+
+    // Trim whitespace
+    size_t start = error_str.find_first_not_of(" \t\n\r");
+    if (start != std::string::npos) {
+        error_str = error_str.substr(start);
+    }
+
+    return error_str;
+}
+
+// Show Lua error dialog with Go to Line button
+static void show_lua_error_dialog(const char* error_msg, const char* script_name) {
+    if (!error_msg) return;
+
+    // Capture strings before async block
+    NSString *errorMsgCopy = [NSString stringWithUTF8String:error_msg];
+    NSString *scriptNameCopy = script_name ? [NSString stringWithUTF8String:script_name] : @"script";
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [[NSAlert alloc] init];
+        NSString *title = [NSString stringWithFormat:@"Syntax Error in %@", scriptNameCopy];
+        [alert setMessageText:title];
+        [alert setAlertStyle:NSAlertStyleCritical];
+
+        // Extract line number from error message
+        int line_number = extract_line_number_from_error([errorMsgCopy UTF8String]);
+
+        // Clean up the error message for better readability
+        std::string cleaned_error = clean_lua_error_message([errorMsgCopy UTF8String]);
+        NSString *errorText = [NSString stringWithUTF8String:cleaned_error.c_str()];
+
+        // Set informative text with line number
+        if (line_number > 0) {
+            [alert setInformativeText:[NSString stringWithFormat:@"Line %d:", line_number]];
+        } else {
+            [alert setInformativeText:@"Error details:"];
+        }
+
+        // Create a scrollable text view for the error message
+        NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 400, 100)];
+        [scrollView setHasVerticalScroller:YES];
+        [scrollView setHasHorizontalScroller:NO];
+        [scrollView setBorderType:NSBezelBorder];
+        [scrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+
+        NSSize contentSize = [scrollView contentSize];
+        NSTextView *textView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, contentSize.width, contentSize.height)];
+
+        [textView setMinSize:NSMakeSize(0.0, contentSize.height)];
+        [textView setMaxSize:NSMakeSize(FLT_MAX, FLT_MAX)];
+        [textView setVerticallyResizable:YES];
+        [textView setHorizontallyResizable:NO];
+        [textView setAutoresizingMask:NSViewWidthSizable];
+
+        [[textView textContainer] setContainerSize:NSMakeSize(contentSize.width, FLT_MAX)];
+        [[textView textContainer] setWidthTracksTextView:YES];
+
+        [textView setString:errorText ? errorText : @"(no error message)"];
+        [textView setEditable:NO];
+        [textView setSelectable:YES];
+        [textView setFont:[NSFont fontWithName:@"Monaco" size:12]];
+        [textView setTextColor:[NSColor labelColor]];
+        [textView setBackgroundColor:[NSColor controlBackgroundColor]];
+
+        [scrollView setDocumentView:textView];
+        [alert setAccessoryView:scrollView];
+
+        // Add buttons
+        [alert addButtonWithTitle:@"OK"];
+
+        if (line_number > 0) {
+            [alert addButtonWithTitle:@"Go to Line"];
+        }
+
+        // Show alert and handle response
+        NSModalResponse response = [alert runModal];
+
+        if (response == NSAlertSecondButtonReturn && line_number > 0) {
+            // User clicked "Go to Line"
+            editor_jump_to_line(line_number);
+        }
+    });
+}
+
+// C interface for showing Lua error dialog (can be called from C++ code)
+extern "C" void show_lua_error_alert(const char* error_msg, const char* script_name) {
+    show_lua_error_dialog(error_msg, script_name);
 }
 
 // Menu system state
@@ -245,6 +411,7 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
 - (IBAction)toggleReplMode:(id)sender;
 - (IBAction)resetReplState:(id)sender;
 - (IBAction)formatLuaCode:(id)sender;
+- (IBAction)checkSyntax:(id)sender;
 - (IBAction)forceQuitApplication:(id)sender;
 @end
 
@@ -258,6 +425,12 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
         return;
     }
 
+    const char* current_filename = editor_get_current_filename();
+
+    // Update status bar with current script name if we have one
+    if (current_filename && strlen(current_filename) > 0) {
+        superterminal_update_script_name(current_filename);
+    }
     // Get database metadata from editor
     bool isFromDB = editor_is_loaded_from_database();
 
@@ -391,6 +564,12 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
             if (loadResult) {
                 editor_set_status([[NSString stringWithFormat:@"Loaded: %@", filename] UTF8String], 180);
                 NSLog(@"Script loaded successfully: %@", filename);
+
+                // Update status bar with loaded script name
+                const char* loaded_filename = editor_get_current_filename();
+                if (loaded_filename && strlen(loaded_filename) > 0) {
+                    superterminal_update_script_name(loaded_filename);
+                }
             } else {
                 editor_set_status("Failed to load script file", 180);
                 NSLog(@"Failed to load script: %@", filename);
@@ -561,6 +740,13 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
     fprintf(stderr, "MENU: Appended end_of_script() marker\n");
     fflush(stderr);
 
+    // Update status bar - script is running
+    const char* script_name = editor_get_current_filename();
+    if (script_name && strlen(script_name) > 0) {
+        superterminal_update_script_name(script_name);
+    }
+    superterminal_update_status("● Running");
+
     // Use sandboxed execution system with wrapped content
     fprintf(stderr, "MENU: === CALLING lua_gcd_exec() ===\n");
     fflush(stderr);
@@ -574,12 +760,17 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
     if (success) {
         fprintf(stderr, "MENU: Script queued successfully\n");
         fflush(stderr);
-        // Script status now shown in title bar - no need for on-screen messages
+        // Script status now shown in title bar and status bar
     } else {
         fprintf(stderr, "MENU: Script execution failed to queue\n");
+        superterminal_update_status("● Stopped");
+
         const char* error = lua_gcd_get_last_error();
         if (error && strlen(error) > 0) {
             fprintf(stderr, "MENU: Error message: %s\n", error);
+            // Show error dialog to user
+            const char* script_name = lua_gcd_get_current_script_name();
+            show_lua_error_dialog(error, script_name ? script_name : "script");
         }
         fflush(stderr);
     }
@@ -589,6 +780,130 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
     fflush(stderr);
 
     // Content already freed after copying to safe buffer
+}
+
+- (IBAction)checkSyntax:(id)sender {
+    @autoreleasepool {
+        NSLog(@"Menu: Check Syntax - MENU HANDLER CALLED");
+
+        // Ensure we're on the main thread
+        if (![NSThread isMainThread]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self checkSyntax:sender];
+            });
+            return;
+        }
+
+        if (!editor_is_active()) {
+            NSLog(@"Menu: Editor not active");
+
+            NSAlert *alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"Editor Not Active"];
+            [alert setInformativeText:@"Please open the editor (F1) to check syntax."];
+            [alert setAlertStyle:NSAlertStyleWarning];
+            [alert addButtonWithTitle:@"OK"];
+            [alert runModal];
+            return;
+        }
+
+        // Get editor content
+        char* content = editor_get_content();
+        if (!content || strlen(content) == 0) {
+            NSLog(@"Menu: No content to check");
+
+            if (content) free(content);
+
+            NSAlert *alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"No Content"];
+            [alert setInformativeText:@"The editor is empty. Nothing to check."];
+            [alert setAlertStyle:NSAlertStyleInformational];
+            [alert addButtonWithTitle:@"OK"];
+            [alert runModal];
+            return;
+        }
+
+        NSLog(@"Menu: Checking syntax for %zu bytes of content", strlen(content));
+
+        // Perform syntax check on background thread, show results on main thread
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            @autoreleasepool {
+                BOOL syntaxOK = NO;
+                NSString *errorMessage = nil;
+                int lineNumber = -1;
+
+                // Create a temporary Lua state to check syntax
+                lua_State* L = luaL_newstate();
+                if (!L) {
+                    NSLog(@"Menu: Failed to create Lua state for syntax check");
+                    free(content);
+
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        NSAlert *alert = [[NSAlert alloc] init];
+                        [alert setMessageText:@"Error"];
+                        [alert setInformativeText:@"Failed to initialize syntax checker."];
+                        [alert setAlertStyle:NSAlertStyleCritical];
+                        [alert addButtonWithTitle:@"OK"];
+                        [alert runModal];
+                    });
+                    return;
+                }
+
+                // Set a safe panic handler
+                lua_atpanic(L, [](lua_State* L) -> int {
+                    return 0; // Don't crash, just return
+                });
+
+                // Try to load the script (this checks syntax without executing)
+                int result = luaL_loadstring(L, content);
+
+                if (result == LUA_OK) {
+                    syntaxOK = YES;
+                } else {
+                    // Syntax error found
+                    const char* error_msg = lua_tostring(L, -1);
+                    if (error_msg) {
+                        errorMessage = [NSString stringWithUTF8String:error_msg];
+                    } else {
+                        errorMessage = @"Unknown syntax error";
+                    }
+                }
+
+                // Clean up
+                lua_close(L);
+                free(content);
+
+                // Get script name on main thread
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    const char* script_name_c = editor_get_current_filename();
+                    NSString *scriptName;
+                    if (script_name_c && strlen(script_name_c) > 0) {
+                        scriptName = [NSString stringWithUTF8String:script_name_c];
+                    } else {
+                        scriptName = @"unsaved script";
+                    }
+
+                    if (syntaxOK) {
+                        NSLog(@"Menu: Syntax check PASSED");
+
+                        NSAlert *alert = [[NSAlert alloc] init];
+                        [alert setMessageText:@"Syntax OK ✓"];
+                        [alert setInformativeText:@"No syntax errors found in the script."];
+                        [alert setAlertStyle:NSAlertStyleInformational];
+                        [alert addButtonWithTitle:@"OK"];
+                        [alert runModal];
+
+                        editor_set_status("Syntax check passed - no errors found", 180);
+                    } else {
+                        NSLog(@"Menu: Syntax check FAILED: %@", errorMessage);
+
+                        // Show error dialog
+                        show_lua_error_dialog([errorMessage UTF8String], [scriptName UTF8String]);
+                        editor_set_status("Syntax error found - see dialog for details", 180);
+                    }
+                });
+            }
+        });
+    }
 }
 
 - (IBAction)formatLuaCode:(id)sender {
@@ -899,6 +1214,9 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
         // Clear sprites and tiles
         sprites_clear();
         tiles_clear();
+
+        // Switch banks to make the clear visible
+        graphics_swap();
 
         dispatch_async(dispatch_get_main_queue(), ^{
             editor_set_status("All graphics cleared", 180);
@@ -1321,6 +1639,11 @@ void superterminal_create_menu_bar() {
 
         NSMenuItem* runScriptItem = [scriptMenu addItemWithTitle:@"Run Script" action:@selector(runScript:) keyEquivalent:@"r"];
         [runScriptItem setTarget:g_menuActions];
+
+        NSMenuItem* checkSyntaxItem = [scriptMenu addItemWithTitle:@"Check Syntax" action:@selector(checkSyntax:) keyEquivalent:@""];
+        [checkSyntaxItem setTarget:g_menuActions];
+
+        [scriptMenu addItem:[NSMenuItem separatorItem]];
 
         NSMenuItem* stopScriptItem = [scriptMenu addItemWithTitle:@"Stop Script" action:@selector(stopScript:) keyEquivalent:@"L"];
         [stopScriptItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];

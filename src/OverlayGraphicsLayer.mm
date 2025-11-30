@@ -380,7 +380,7 @@ static void applyFiltersToPaint(SkPaint& paint) {
 - (instancetype)initWithDevice:(id<MTLDevice>)device canvasSize:(CGSize)size {
     self = [super init];
     if (self) {
-        NSLog(@"OverlaySkiaGraphicsLayer: Initializing");
+        // OverlaySkiaGraphicsLayer initializing (debug logging disabled)
         self.device = device;
         self.canvasSize = size;
 

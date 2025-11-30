@@ -401,6 +401,14 @@ add_custom_command(TARGET interactive_luarunner POST_BUILD
     COMMENT "Copying Particle.metallib shader into app bundle"
 )
 
+# Copy Sprite.metallib shader into app bundle Resources
+add_custom_command(TARGET interactive_luarunner POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_BINARY_DIR}/Sprite.metallib"
+        "$<TARGET_BUNDLE_DIR:interactive_luarunner>/Contents/Resources/Sprite.metallib"
+    COMMENT "Copying Sprite.metallib shader into app bundle"
+)
+
 # Update executable's rpath to find embedded framework
 set_target_properties(interactive_luarunner PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE

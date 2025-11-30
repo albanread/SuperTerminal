@@ -647,8 +647,7 @@ extern "C" {
         return;
     }
 
-    NSLog(@"TileLayer: Updating viewport for %dx%d tiles at (%d,%d)",
-          VIEWPORT_WIDTH, VIEWPORT_HEIGHT, _viewport.x, _viewport.y);
+    // Viewport update (debug logging disabled)
 
     TileVertex* vertices = (TileVertex*)[self.vertexBuffer contents];
     int vertexIndex = 0;
@@ -736,7 +735,7 @@ extern "C" {
 
     // Update vertex data if needed
     if (self.needsUpdate) {
-        NSLog(@"TileLayer: Updating viewport vertices");
+        // Updating viewport vertices (debug logging disabled)
         [self updateViewport];
     }
 
