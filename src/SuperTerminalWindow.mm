@@ -1201,6 +1201,38 @@ extern "C" {
             return;
         }
 
+        // Page Up - Scroll text buffer up one page
+        if (base_keycode == 0x74) {  // Page Up
+            extern void text_page_up();
+            text_page_up();
+            NSLog(@"Page Up pressed - scrolling text buffer up");
+            return;
+        }
+
+        // Page Down - Scroll text buffer down one page
+        if (base_keycode == 0x79) {  // Page Down
+            extern void text_page_down();
+            text_page_down();
+            NSLog(@"Page Down pressed - scrolling text buffer down");
+            return;
+        }
+
+        // Cmd+Home - Scroll to top of text buffer
+        if (cmd && base_keycode == 0x73) {  // Home
+            extern void text_scroll_to_top();
+            text_scroll_to_top();
+            NSLog(@"Cmd+Home pressed - scrolling to top of text buffer");
+            return;
+        }
+
+        // Cmd+End - Scroll to bottom of text buffer and re-enable auto-scroll
+        if (cmd && base_keycode == 0x77) {  // End
+            extern void text_scroll_to_bottom();
+            text_scroll_to_bottom();
+            NSLog(@"Cmd+End pressed - scrolling to bottom of text buffer");
+            return;
+        }
+
         // Keys handled by input system only
 
         // F3 - Let the editor handle it when active (removed interception)

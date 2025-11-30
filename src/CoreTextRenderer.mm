@@ -88,6 +88,11 @@ struct GlyphCacheEntry {
 @property (nonatomic, assign) int viewportStartRow;  // First row to render (default 0)
 @property (nonatomic, assign) int viewportRowCount;  // Number of rows to render (default GRID_HEIGHT)
 
+// Scrollback buffer properties
+@property (nonatomic, assign) int viewportStartLine;  // Top line visible in viewport (0 to BUFFER_HEIGHT - viewportHeight)
+@property (nonatomic, assign) int viewportHeight;     // Number of visible lines (typically matches window)
+@property (nonatomic, assign) BOOL autoScroll;        // Auto-scroll to follow cursor
+
 // Layout offsets for centering text grid in viewport
 @property (nonatomic, assign) float layoutOffsetX;  // Horizontal centering offset
 @property (nonatomic, assign) float layoutOffsetY;  // Vertical centering offset
@@ -127,6 +132,22 @@ struct GlyphCacheEntry {
 - (void)setPaper:(simd_float4)paper;
 - (void)createVertexBuffer;
 
+// Scrollback buffer methods
+- (void)locateLine:(int)line;
+- (void)scrollToLine:(int)line;
+- (void)scrollUp:(int)lines;
+- (void)scrollDown:(int)lines;
+- (void)pageUp;
+- (void)pageDown;
+- (void)scrollToTop;
+- (void)scrollToBottom;
+- (int)getCursorLine;
+- (int)getCursorColumn;
+- (int)getViewportLine;
+- (int)getViewportHeight;
+- (void)setAutoScroll:(BOOL)enabled;
+- (BOOL)getAutoScroll;
+
 @end
 
 @implementation CoreTextLayer
@@ -141,12 +162,17 @@ struct GlyphCacheEntry {
         self.device = device;
         self.isEditorLayer = isEditor;
 
-        // Initialize text grid
-        self.textGrid = (struct TextCell*)calloc(GRID_WIDTH * GRID_HEIGHT, sizeof(struct TextCell));
+        // Initialize text grid with 2000-line scrollback buffer
+        self.textGrid = (struct TextCell*)calloc(BUFFER_WIDTH * BUFFER_HEIGHT, sizeof(struct TextCell));
 
         // Initialize viewport (default: render all rows)
         self.viewportStartRow = 0;
         self.viewportRowCount = GRID_HEIGHT;
+
+        // Initialize scrollback viewport
+        self.viewportStartLine = 0;
+        self.viewportHeight = 60;  // Default, will update based on window
+        self.autoScroll = YES;     // Auto-scroll enabled by default
 
         // Initialize layout offsets (default: no offset)
         self.layoutOffsetX = 0.0f;
@@ -758,7 +784,9 @@ struct GlyphCacheEntry {
 }
 
 - (void)createVertexBuffer {
-    size_t bufferSize = GRID_WIDTH * GRID_HEIGHT * 6 * sizeof(struct TextVertex);
+    // Only allocate buffer for visible viewport, not entire 2000-line buffer
+    // Maximum 100 visible lines should be more than enough for any window size
+    size_t bufferSize = BUFFER_WIDTH * 100 * 6 * sizeof(struct TextVertex);
     self.vertexBuffer = [self.device newBufferWithLength:bufferSize options:MTLResourceStorageModeShared];
 
     // Create uniform buffer for cursor and text mode info
@@ -821,35 +849,72 @@ struct GlyphCacheEntry {
             self.cursorX = 0;
             self.cursorY++;
 
-            // Scroll if we've gone past the bottom
-            if (self.cursorY >= GRID_HEIGHT) {
-                [self scrollUp];
-                self.cursorY = GRID_HEIGHT - 1;
+            // Handle buffer overflow - scroll entire buffer up
+            if (self.cursorY >= BUFFER_HEIGHT) {
+                // Move all lines up by 100 lines to free space at bottom (efficient memcpy)
+                const int scrollAmount = 100;
+                memmove(self.textGrid,
+                       self.textGrid + (scrollAmount * BUFFER_WIDTH),
+                       (BUFFER_HEIGHT - scrollAmount) * BUFFER_WIDTH * sizeof(struct TextCell));
+
+                // Clear the newly freed lines at bottom (efficient memset)
+                memset(self.textGrid + (BUFFER_HEIGHT - scrollAmount) * BUFFER_WIDTH,
+                       0,
+                       scrollAmount * BUFFER_WIDTH * sizeof(struct TextCell));
+
+                // Adjust cursor and viewport
+                self.cursorY = BUFFER_HEIGHT - scrollAmount;
+                if (self.viewportStartLine >= scrollAmount) {
+                    self.viewportStartLine -= scrollAmount;
+                } else {
+                    self.viewportStartLine = 0;
+                }
+            }
+
+            // Auto-scroll viewport to follow cursor if enabled
+            if (self.autoScroll && self.cursorY >= self.viewportStartLine + self.viewportHeight) {
+                self.viewportStartLine = self.cursorY - self.viewportHeight + 1;
+                if (self.viewportStartLine < 0) self.viewportStartLine = 0;
             }
         } else if (ch == '\r') {
             // Carriage return: move to start of current line
             self.cursorX = 0;
         } else {
             // Regular character: print at cursor position
-            if (self.cursorY < GRID_HEIGHT) {
-                int index = self.cursorY * GRID_WIDTH + self.cursorX;
-                self.textGrid[index].character = ch;
-                self.textGrid[index].inkColor = self.currentInk;
-                self.textGrid[index].paperColor = self.currentPaper;
+            int index = self.cursorY * BUFFER_WIDTH + self.cursorX;
+            self.textGrid[index].character = ch;
+            self.textGrid[index].inkColor = self.currentInk;
+            self.textGrid[index].paperColor = self.currentPaper;
 
-                // Advance cursor
-                self.cursorX++;
+            // Advance cursor
+            self.cursorX++;
 
-                // Wrap to next line if we reach the right edge
-                if (self.cursorX >= GRID_WIDTH) {
-                    self.cursorX = 0;
-                    self.cursorY++;
+            // Wrap to next line if we reach the right edge
+            if (self.cursorX >= BUFFER_WIDTH) {
+                self.cursorX = 0;
+                self.cursorY++;
 
-                    // Scroll if we've gone past the bottom
-                    if (self.cursorY >= GRID_HEIGHT) {
-                        [self scrollUp];
-                        self.cursorY = GRID_HEIGHT - 1;
+                // Handle buffer overflow on wrap
+                if (self.cursorY >= BUFFER_HEIGHT) {
+                    const int scrollAmount = 100;
+                    memmove(self.textGrid,
+                           self.textGrid + (scrollAmount * BUFFER_WIDTH),
+                           (BUFFER_HEIGHT - scrollAmount) * BUFFER_WIDTH * sizeof(struct TextCell));
+                    memset(self.textGrid + (BUFFER_HEIGHT - scrollAmount) * BUFFER_WIDTH,
+                           0,
+                           scrollAmount * BUFFER_WIDTH * sizeof(struct TextCell));
+                    self.cursorY = BUFFER_HEIGHT - scrollAmount;
+                    if (self.viewportStartLine >= scrollAmount) {
+                        self.viewportStartLine -= scrollAmount;
+                    } else {
+                        self.viewportStartLine = 0;
                     }
+                }
+
+                // Auto-scroll viewport
+                if (self.autoScroll && self.cursorY >= self.viewportStartLine + self.viewportHeight) {
+                    self.viewportStartLine = self.cursorY - self.viewportHeight + 1;
+                    if (self.viewportStartLine < 0) self.viewportStartLine = 0;
                 }
             }
         }
@@ -866,18 +931,21 @@ struct GlyphCacheEntry {
 }
 
 - (void)printAt:(int)x y:(int)y text:(NSString*)text {
-    if (x < 0 || x >= GRID_WIDTH || y < 0 || y >= GRID_HEIGHT) return;
+    // y is relative to viewport - convert to absolute buffer position
+    int absoluteY = self.viewportStartLine + y;
+
+    if (x < 0 || x >= BUFFER_WIDTH || absoluteY < 0 || absoluteY >= BUFFER_HEIGHT) return;
 
     self.cursorX = x;
-    self.cursorY = y;
+    self.cursorY = absoluteY;
 
     // Update layer state when cursor position set
     if (self.isEditorLayer) {
         g_editor_state.cursorX = x;
-        g_editor_state.cursorY = y;
+        g_editor_state.cursorY = absoluteY;
     } else {
         g_terminal_state.cursorX = x;
-        g_terminal_state.cursorY = y;
+        g_terminal_state.cursorY = absoluteY;
     }
 
     [self print:text];
@@ -888,13 +956,22 @@ struct GlyphCacheEntry {
     // This keeps layer 5 transparent by default so other layers are visible
     simd_float4 clearPaper = self.isEditorLayer ? self.currentPaper : simd_make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    for (int i = 0; i < GRID_WIDTH * GRID_HEIGHT; i++) {
+    // Performance: Zero out entire buffer efficiently
+    memset(self.textGrid, 0, BUFFER_WIDTH * BUFFER_HEIGHT * sizeof(struct TextCell));
+
+    // Only initialize visible viewport with spaces (for rendering)
+    int visibleCells = BUFFER_WIDTH * (self.viewportHeight > 0 ? self.viewportHeight : 60);
+    for (int i = 0; i < visibleCells; i++) {
         self.textGrid[i].character = ' ';
         self.textGrid[i].inkColor = self.currentInk;
         self.textGrid[i].paperColor = clearPaper;
     }
+
     self.cursorX = 0;
     self.cursorY = 0;
+
+    // Reset viewport to top
+    self.viewportStartLine = 0;
 
     // Save cursor position to layer-specific state
     if (self.isEditorLayer) {
@@ -965,18 +1042,23 @@ struct GlyphCacheEntry {
 
     // Two-pass rendering: backgrounds first, then glyphs
     // Pass 1: Render background for all cells with extended height to cover glyph extents
-    // Only render rows within the viewport
+    // Performance optimization: only render the visible viewport region from scrollback buffer
+    const int bufferStartLine = self.viewportStartLine;
+    const int bufferEndLine = MIN(bufferStartLine + activeRows, BUFFER_HEIGHT);
+
     int startRow = self.viewportStartRow;
-    int endRow = MIN(startRow + self.viewportRowCount, GRID_HEIGHT);
-    endRow = MIN(endRow, activeRows);
+    int endRow = MIN(startRow + self.viewportRowCount, activeRows);
 
     // Sextant character range for chunky pixel mode
     #define SEXTANT_BASE 0x1FB00
     #define SEXTANT_MAX  0x1FB3F
 
-    for (int y = startRow; y < endRow; y++) {
-        for (int x = 0; x < activeColumns && x < GRID_WIDTH; x++) {
-            int index = y * GRID_WIDTH + x;
+    for (int bufferY = bufferStartLine; bufferY < bufferEndLine; bufferY++) {
+        int screenY_idx = bufferY - bufferStartLine;  // Convert to screen coordinates
+        if (screenY_idx < startRow || screenY_idx >= endRow) continue;
+
+        for (int x = 0; x < activeColumns && x < BUFFER_WIDTH; x++) {
+            int index = bufferY * BUFFER_WIDTH + x;
             struct TextCell* cell = &self.textGrid[index];
 
             // Skip completely empty cells
@@ -986,7 +1068,7 @@ struct GlyphCacheEntry {
             // Apply layout offsets for proper centering in viewport
             // Subtract baseline offset to eliminate gap at top of screen
             float screenX = x * self.charWidth + self.layoutOffsetX;
-            float screenY = y * self.charHeight - (self.baseline - self.maxGlyphHeight) + self.layoutOffsetY;
+            float screenY = screenY_idx * self.charHeight - (self.baseline - self.maxGlyphHeight) + self.layoutOffsetY;
 
             // Check if this is a sextant character (chunky pixel mode)
             bool isSextant = (cell->character >= SEXTANT_BASE && cell->character <= SEXTANT_MAX);
@@ -998,7 +1080,7 @@ struct GlyphCacheEntry {
                     FILE* debugFile = fopen("/tmp/superterminal_chunky_debug.log", "a");
                     if (debugFile) {
                         fprintf(debugFile, "RENDER: Found sextant char 0x%X at (%d,%d) ink=(%.2f,%.2f,%.2f,%.2f) paper=(%.2f,%.2f,%.2f,%.2f)\n",
-                                cell->character, x, y,
+                                cell->character, x, screenY_idx,
                                 cell->inkColor.x, cell->inkColor.y, cell->inkColor.z, cell->inkColor.w,
                                 cell->paperColor.x, cell->paperColor.y, cell->paperColor.z, cell->paperColor.w);
                         fflush(debugFile);
@@ -1137,10 +1219,13 @@ struct GlyphCacheEntry {
     }
 
     // Pass 2: Render glyphs for non-space characters
-    // Only render rows within the viewport
-    for (int y = startRow; y < endRow; y++) {
-        for (int x = 0; x < activeColumns && x < GRID_WIDTH; x++) {
-            int index = y * GRID_WIDTH + x;
+    // Only render rows within the viewport from scrollback buffer
+    for (int bufferY = bufferStartLine; bufferY < bufferEndLine; bufferY++) {
+        int screenY_idx = bufferY - bufferStartLine;  // Convert to screen coordinates
+        if (screenY_idx < startRow || screenY_idx >= endRow) continue;
+
+        for (int x = 0; x < activeColumns && x < BUFFER_WIDTH; x++) {
+            int index = bufferY * BUFFER_WIDTH + x;
             struct TextCell* cell = &self.textGrid[index];
 
             // Skip spaces and empty cells
@@ -1157,7 +1242,7 @@ struct GlyphCacheEntry {
             // Apply layout offsets for proper centering in viewport
             // Subtract baseline offset to eliminate gap at top of screen
             float screenX = x * self.charWidth + self.layoutOffsetX;
-            float screenY = y * self.charHeight - (self.baseline - self.maxGlyphHeight) + self.layoutOffsetY;
+            float screenY = screenY_idx * self.charHeight - (self.baseline - self.maxGlyphHeight) + self.layoutOffsetY;
 
             // Calculate texture coordinates
             float u0 = entry.atlasRect.origin.x / (float)self.atlasWidth;
@@ -1182,7 +1267,7 @@ struct GlyphCacheEntry {
             // (Enable if needed for debugging glyph rendering issues)
 
             // Generate 6 vertices (2 triangles) for the glyph
-            simd_float2 gridPosition = simd_make_float2(x, y);
+            simd_float2 gridPosition = simd_make_float2(x, screenY_idx);
 
             // Debug: Log gridPos for first few characters to verify
             static int debugCount = 0;
@@ -1308,6 +1393,80 @@ struct GlyphCacheEntry {
 
 - (void)setPaper:(simd_float4)paper {
     self.currentPaper = paper;
+}
+
+// Scrollback buffer methods implementation
+- (void)locateLine:(int)line {
+    if (line >= 0 && line < BUFFER_HEIGHT) {
+        self.cursorY = line;
+        self.cursorX = 0;  // Reset to start of line
+    }
+}
+
+- (void)scrollToLine:(int)line {
+    // Clamp to valid range
+    int maxStart = BUFFER_HEIGHT - self.viewportHeight;
+    if (maxStart < 0) maxStart = 0;
+
+    self.viewportStartLine = line;
+    if (self.viewportStartLine < 0) self.viewportStartLine = 0;
+    if (self.viewportStartLine > maxStart) self.viewportStartLine = maxStart;
+
+    // Disable auto-scroll when manually scrolling
+    self.autoScroll = NO;
+}
+
+- (void)scrollUp:(int)lines {
+    [self scrollToLine:self.viewportStartLine - lines];
+}
+
+- (void)scrollDown:(int)lines {
+    [self scrollToLine:self.viewportStartLine + lines];
+}
+
+- (void)pageUp {
+    [self scrollUp:self.viewportHeight];
+}
+
+- (void)pageDown {
+    [self scrollDown:self.viewportHeight];
+}
+
+- (void)scrollToTop {
+    [self scrollToLine:0];
+}
+
+- (void)scrollToBottom {
+    // Scroll to show cursor at bottom of viewport
+    int targetLine = self.cursorY - self.viewportHeight + 1;
+    if (targetLine < 0) targetLine = 0;
+
+    self.viewportStartLine = targetLine;
+    self.autoScroll = YES;  // Re-enable auto-scroll
+}
+
+- (int)getCursorLine {
+    return self.cursorY;
+}
+
+- (int)getCursorColumn {
+    return self.cursorX;
+}
+
+- (int)getViewportLine {
+    return self.viewportStartLine;
+}
+
+- (int)getViewportHeight {
+    return self.viewportHeight;
+}
+
+- (void)setAutoScroll:(BOOL)enabled {
+    self.autoScroll = enabled;
+}
+
+- (BOOL)getAutoScroll {
+    return self.autoScroll;
 }
 
 @end
@@ -2580,6 +2739,124 @@ extern "C" {
                 fprintf(debugFile, "CHUNKY: No terminal layer found!\n");
                 fflush(debugFile);
                 fclose(debugFile);
+            }
+        }
+
+        // Scrollback buffer C API functions
+        void text_locate_line(int line) {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer locateLine:line];
+                }
+            }
+        }
+
+        void text_scroll_to_line(int line) {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer scrollToLine:line];
+                }
+            }
+        }
+
+        void text_scroll_up(int lines) {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer scrollUp:lines];
+                }
+            }
+        }
+
+        void text_scroll_down(int lines) {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer scrollDown:lines];
+                }
+            }
+        }
+
+        void text_page_up() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer pageUp];
+                }
+            }
+        }
+
+        void text_page_down() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer pageDown];
+                }
+            }
+        }
+
+        void text_scroll_to_top() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer scrollToTop];
+                }
+            }
+        }
+
+        void text_scroll_to_bottom() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer scrollToBottom];
+                }
+            }
+        }
+
+        int text_get_cursor_line() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    return [g_terminalTextLayer getCursorLine];
+                }
+                return 0;
+            }
+        }
+
+        int text_get_cursor_column() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    return [g_terminalTextLayer getCursorColumn];
+                }
+                return 0;
+            }
+        }
+
+        int text_get_viewport_line() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    return [g_terminalTextLayer getViewportLine];
+                }
+                return 0;
+            }
+        }
+
+        int text_get_viewport_height() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    return [g_terminalTextLayer getViewportHeight];
+                }
+                return 60;
+            }
+        }
+
+        void text_set_autoscroll(bool enabled) {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    [g_terminalTextLayer setAutoScroll:enabled ? YES : NO];
+                }
+            }
+        }
+
+        bool text_get_autoscroll() {
+            @autoreleasepool {
+                if (g_terminalTextLayer) {
+                    return [g_terminalTextLayer getAutoScroll] ? true : false;
+                }
+                return true;
             }
         }
     }

@@ -51,6 +51,22 @@ extern "C" {
     bool initialize_bullet_system_from_lua(void* metal_device, void* sprite_layer);
     void shutdown_bullet_system_from_lua();
     
+    // Forward declarations for text layer scrollback functions
+    void text_locate_line(int line);
+    void text_scroll_to_line(int line);
+    void text_scroll_up(int lines);
+    void text_scroll_down(int lines);
+    void text_page_up();
+    void text_page_down();
+    void text_scroll_to_top();
+    void text_scroll_to_bottom();
+    int text_get_cursor_line();
+    int text_get_cursor_column();
+    int text_get_viewport_line();
+    int text_get_viewport_height();
+    void text_set_autoscroll(bool enabled);
+    bool text_get_autoscroll();
+    
     // Forward declarations for audio system functions
     extern "C" void register_audio_lua_bindings(lua_State* L);
     extern "C" void register_assets_lua_bindings(lua_State* L);
@@ -167,6 +183,23 @@ static int lua_superterminal_print(lua_State* L);
 static int lua_superterminal_print_at(lua_State* L);
 static int lua_superterminal_cls(lua_State* L);
 static int lua_superterminal_home(lua_State* L);
+
+// Text scrollback buffer functions
+static int lua_text_locate_line(lua_State* L);
+static int lua_text_scroll_to_line(lua_State* L);
+static int lua_text_scroll_up(lua_State* L);
+static int lua_text_scroll_down(lua_State* L);
+static int lua_text_page_up(lua_State* L);
+static int lua_text_page_down(lua_State* L);
+static int lua_text_scroll_to_top(lua_State* L);
+static int lua_text_scroll_to_bottom(lua_State* L);
+static int lua_text_get_cursor_line(lua_State* L);
+static int lua_text_get_cursor_column(lua_State* L);
+static int lua_text_get_viewport_line(lua_State* L);
+static int lua_text_get_viewport_height(lua_State* L);
+static int lua_text_set_autoscroll(lua_State* L);
+static int lua_text_get_autoscroll(lua_State* L);
+
 static int lua_superterminal_set_color(lua_State* L);
 static int lua_superterminal_end_of_script(lua_State* L);
 static int lua_superterminal_start_of_script(lua_State* L);
@@ -597,6 +630,23 @@ extern "C" void register_superterminal_api(lua_State* L) {
     lua_register(L, "print_at", lua_superterminal_print_at);
     lua_register(L, "cls", lua_superterminal_cls);
     lua_register(L, "home", lua_superterminal_home);
+    
+    // Text scrollback buffer functions
+    lua_register(L, "text_locate_line", lua_text_locate_line);
+    lua_register(L, "text_scroll_to_line", lua_text_scroll_to_line);
+    lua_register(L, "text_scroll_up", lua_text_scroll_up);
+    lua_register(L, "text_scroll_down", lua_text_scroll_down);
+    lua_register(L, "text_page_up", lua_text_page_up);
+    lua_register(L, "text_page_down", lua_text_page_down);
+    lua_register(L, "text_scroll_to_top", lua_text_scroll_to_top);
+    lua_register(L, "text_scroll_to_bottom", lua_text_scroll_to_bottom);
+    lua_register(L, "text_get_cursor_line", lua_text_get_cursor_line);
+    lua_register(L, "text_get_cursor_column", lua_text_get_cursor_column);
+    lua_register(L, "text_get_viewport_line", lua_text_get_viewport_line);
+    lua_register(L, "text_get_viewport_height", lua_text_get_viewport_height);
+    lua_register(L, "text_set_autoscroll", lua_text_set_autoscroll);
+    lua_register(L, "text_get_autoscroll", lua_text_get_autoscroll);
+    
     lua_register(L, "set_color", lua_superterminal_set_color);
     lua_register(L, "set_ink", lua_superterminal_set_ink);
     lua_register(L, "poke_colour", lua_superterminal_poke_colour);
@@ -2863,6 +2913,87 @@ void shutdown_repl_lua() {
 static int lua_superterminal_home(lua_State* L) {
     home();
     return 0;
+}
+
+// Text scrollback buffer Lua wrapper functions
+static int lua_text_locate_line(lua_State* L) {
+    int line = luaL_checkinteger(L, 1);
+    text_locate_line(line);
+    return 0;
+}
+
+static int lua_text_scroll_to_line(lua_State* L) {
+    int line = luaL_checkinteger(L, 1);
+    text_scroll_to_line(line);
+    return 0;
+}
+
+static int lua_text_scroll_up(lua_State* L) {
+    int lines = luaL_checkinteger(L, 1);
+    text_scroll_up(lines);
+    return 0;
+}
+
+static int lua_text_scroll_down(lua_State* L) {
+    int lines = luaL_checkinteger(L, 1);
+    text_scroll_down(lines);
+    return 0;
+}
+
+static int lua_text_page_up(lua_State* L) {
+    text_page_up();
+    return 0;
+}
+
+static int lua_text_page_down(lua_State* L) {
+    text_page_down();
+    return 0;
+}
+
+static int lua_text_scroll_to_top(lua_State* L) {
+    text_scroll_to_top();
+    return 0;
+}
+
+static int lua_text_scroll_to_bottom(lua_State* L) {
+    text_scroll_to_bottom();
+    return 0;
+}
+
+static int lua_text_get_cursor_line(lua_State* L) {
+    int line = text_get_cursor_line();
+    lua_pushinteger(L, line);
+    return 1;
+}
+
+static int lua_text_get_cursor_column(lua_State* L) {
+    int col = text_get_cursor_column();
+    lua_pushinteger(L, col);
+    return 1;
+}
+
+static int lua_text_get_viewport_line(lua_State* L) {
+    int line = text_get_viewport_line();
+    lua_pushinteger(L, line);
+    return 1;
+}
+
+static int lua_text_get_viewport_height(lua_State* L) {
+    int height = text_get_viewport_height();
+    lua_pushinteger(L, height);
+    return 1;
+}
+
+static int lua_text_set_autoscroll(lua_State* L) {
+    bool enabled = lua_toboolean(L, 1);
+    text_set_autoscroll(enabled);
+    return 0;
+}
+
+static int lua_text_get_autoscroll(lua_State* L) {
+    bool enabled = text_get_autoscroll();
+    lua_pushboolean(L, enabled);
+    return 1;
 }
 
 static int lua_superterminal_set_color(lua_State* L) {

@@ -34,6 +34,10 @@
 static const int GRID_WIDTH = 160;  // Maximum 160 columns (supports long lines with horizontal scrolling)
 static const int GRID_HEIGHT = 60; // Maximum 60 rows (supports taller windows)
 
+// Scrollback buffer constants
+static const int BUFFER_WIDTH = 160;   // Buffer width (same as GRID_WIDTH)
+static const int BUFFER_HEIGHT = 2000; // Total scrollback buffer: 2000 lines
+
 // Text cell structure (may be defined elsewhere, e.g., SuperTerminal.h)
 #ifndef TEXTCELL_DEFINED
 #define TEXTCELL_DEFINED
