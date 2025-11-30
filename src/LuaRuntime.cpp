@@ -67,6 +67,10 @@ extern "C" {
     void text_set_autoscroll(bool enabled);
     bool text_get_autoscroll();
     
+    // Status bar update functions
+    void superterminal_update_status(const char* status);
+    void superterminal_update_script_name(const char* scriptName);
+    
     // Forward declarations for audio system functions
     extern "C" void register_audio_lua_bindings(lua_State* L);
     extern "C" void register_assets_lua_bindings(lua_State* L);
@@ -1460,6 +1464,10 @@ bool exec_lua_sandboxed(const char* lua_code) {
         set_window_title("script running");
     });
     
+    // Update status bar - script starting
+    superterminal_update_status("● Running");
+    superterminal_update_script_name("script");
+    
     g_current_execution->thread = std::thread([script_content]() {
         auto& exec = *g_current_execution;
         exec.running = true;
@@ -1622,6 +1630,9 @@ bool exec_lua_sandboxed(const char* lua_code) {
         SuperTerminal::g_command_queue.queueVoidCommand([title]() {
             set_window_title(title.c_str());
         });
+        
+        // Update status bar - script ended
+        superterminal_update_status("● Stopped");
     });
     
     // Keep thread joinable so we can clean it up properly
@@ -1658,6 +1669,10 @@ void cleanup_finished_executions() {
         SuperTerminal::g_command_queue.queueVoidCommand([]() {
             set_window_title("SuperTerminal");
         });
+        
+        // Update status bar - no script running
+        superterminal_update_status("● Stopped");
+        superterminal_update_script_name("");
     }
 }
 
@@ -2711,11 +2726,12 @@ static int lua_superterminal_end_of_script(lua_State* L) {
             console(end_message.c_str());
         }
         
-        // Update window title - use non-blocking command queue
-        extern void set_window_title(const char* title);
         SuperTerminal::g_command_queue.queueVoidCommand([]() {
             set_window_title("SuperTerminal - Script ended");
         });
+        
+        // Update status bar - script stopped
+        superterminal_update_status("● Stopped");
         
         // Terminate Lua execution cleanly
         // GCD runtime will handle cleanup via RAII guard
@@ -2743,6 +2759,9 @@ static int lua_superterminal_end_of_script(lua_State* L) {
         SuperTerminal::g_command_queue.queueVoidCommand([title]() {
             set_window_title(title.c_str());
         });
+        
+        // Update status bar - script stopped
+        superterminal_update_status("● Stopped");
         
         std::cout << "LuaRuntime: Flags set and title updated, now terminating Lua execution" << std::endl;
         
@@ -2773,6 +2792,10 @@ static int lua_superterminal_start_of_script(lua_State* L) {
     SuperTerminal::g_command_queue.queueVoidCommand([title]() {
         set_window_title(title.c_str());
     });
+    
+    // Update status bar - script running
+    superterminal_update_status("● Running");
+    superterminal_update_script_name(script_name);
     
     return 0;
 }
