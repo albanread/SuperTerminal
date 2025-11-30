@@ -1,0 +1,295 @@
+//
+//  AssetsLuaBindings.cpp
+//  SuperTerminal Framework - Asset Management Lua Bindings
+//
+//  Created by SuperTerminal Project
+//  Copyright © 2024 SuperTerminal. All rights reserved.
+//
+//  Lua bindings for saving and loading sound assets to/from the asset database
+//
+
+#include "AssetsManager.h"
+#include "../audio/AudioDaemonIntegration.h"
+#include <iostream>
+#include <fstream>
+#include <vector>
+
+extern "C" {
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+}
+
+// Forward declarations for audio functions
+extern uint32_t audio_load_sound(const char* filename);
+
+// Forward declaration with C linkage
+extern "C" bool audio_export_sound_to_pcm_bytes(uint32_t sound_id, std::vector<uint8_t>& outPCMData);
+extern "C" SuperTerminal::AssetsManager* subsystem_manager_get_assets_manager();
+
+// Helper: Get AssetsManager instance
+static SuperTerminal::AssetsManager* getAssetsManager() {
+    // Get from SubsystemManager if available
+    return subsystem_manager_get_assets_manager();
+}
+
+// Helper: Read file into vector
+static bool readFile(const std::string& filename, std::vector<uint8_t>& data) {
+    std::ifstream file(filename, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        return false;
+    }
+    
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    
+    data.resize(size);
+    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
+        return false;
+    }
+    
+    return true;
+}
+
+// asset_save_sound(wav_filename, asset_name, [description])
+// Saves a WAV file to the asset database
+static int lua_asset_save_sound(lua_State* L) {
+    int argc = lua_gettop(L);
+    if (argc < 2 || argc > 3) {
+        return luaL_error(L, "asset_save_sound() expects 2-3 arguments: wav_filename, asset_name, [description]");
+    }
+    
+    const char* wav_filename = luaL_checkstring(L, 1);
+    const char* asset_name = luaL_checkstring(L, 2);
+    const char* description = (argc >= 3) ? luaL_checkstring(L, 3) : "";
+    
+    auto assetMgr = getAssetsManager();
+    if (!assetMgr) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "AssetsManager not available");
+        return 2;
+    }
+    
+    // Read WAV file
+    std::vector<uint8_t> wav_data;
+    if (!readFile(wav_filename, wav_data)) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Failed to read WAV file");
+        return 2;
+    }
+    
+    // Create metadata
+    SuperTerminal::AssetMetadata metadata;
+    metadata.name = asset_name;
+    metadata.kind = SuperTerminal::AssetKind::SOUND;
+    metadata.description = description;
+    metadata.compressed = false;  // WAV files are typically small enough
+    metadata.data = wav_data;
+    
+    // Add to database
+    if (!assetMgr->addAsset(metadata)) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, assetMgr->getLastError().c_str());
+        return 2;
+    }
+    
+    std::cout << "AssetsLua: Saved sound asset '" << asset_name << "' (" 
+              << wav_data.size() << " bytes)" << std::endl;
+    
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+// success, [error] = asset_save_sound_from_memory(sound_id, asset_name, [description])
+// Saves a memory-generated sound (from create_oscillator) to the asset database
+static int lua_asset_save_sound_from_memory(lua_State* L) {
+    int argc = lua_gettop(L);
+    if (argc < 2 || argc > 3) {
+        return luaL_error(L, "asset_save_sound_from_memory() expects 2-3 arguments: sound_id, asset_name, [description]");
+    }
+    
+    uint32_t sound_id = (uint32_t)luaL_checkinteger(L, 1);
+    const char* asset_name = luaL_checkstring(L, 2);
+    const char* description = (argc >= 3) ? luaL_checkstring(L, 3) : "";
+    
+    auto assetMgr = getAssetsManager();
+    if (!assetMgr) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "AssetsManager not available");
+        return 2;
+    }
+    
+    // Export the sound to raw PCM data
+    std::vector<uint8_t> pcm_data;
+    if (!audio_export_sound_to_pcm_bytes(sound_id, pcm_data)) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "Failed to export sound to PCM format");
+        return 2;
+    }
+    
+    // Create metadata
+    SuperTerminal::AssetMetadata metadata;
+    metadata.name = asset_name;
+    metadata.kind = SuperTerminal::AssetKind::SOUND;
+    metadata.format = SuperTerminal::AssetFormat::PCM;
+    metadata.description = description;
+    metadata.compressed = true;  // Enable zstd compression
+    metadata.data = pcm_data;
+    
+    // Add to database (compression happens in addAsset)
+    if (!assetMgr->addAsset(metadata)) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, assetMgr->getLastError().c_str());
+        return 2;
+    }
+    
+    std::cout << "AssetsLua: Saved sound asset '" << asset_name << "' from memory (ID: " 
+              << sound_id << ", " << pcm_data.size() << " bytes, compressed)" << std::endl;
+    
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+// sound_id = asset_load_sound(asset_name)
+// Loads a sound from the asset database and returns its sound ID
+static int lua_asset_load_sound(lua_State* L) {
+    if (lua_gettop(L) != 1) {
+        return luaL_error(L, "asset_load_sound() expects 1 argument: asset_name");
+    }
+    
+    const char* asset_name = luaL_checkstring(L, 1);
+    
+    auto assetMgr = getAssetsManager();
+    if (!assetMgr) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    
+    // Load sound through asset manager (use reference overload)
+    uint32_t sound_id = 0;
+    std::string asset_name_str(asset_name);
+    
+    // Explicitly select the reference overload to avoid ambiguity
+    using LoadSoundRefFunc = SuperTerminal::AssetLoadResult (SuperTerminal::AssetsManager::*)(const std::string&, uint32_t&);
+    LoadSoundRefFunc loadSoundRef = &SuperTerminal::AssetsManager::loadSound;
+    SuperTerminal::AssetLoadResult result = (assetMgr->*loadSoundRef)(asset_name_str, sound_id);
+    
+    if (result == SuperTerminal::AssetLoadResult::SUCCESS) {
+        std::cout << "AssetsLua: Loaded sound asset '" << asset_name 
+                  << "' (ID: " << sound_id << ")" << std::endl;
+        lua_pushinteger(L, sound_id);
+    } else {
+        std::cerr << "AssetsLua: Failed to load sound asset '" << asset_name 
+                  << "': " << assetMgr->getLastError() << std::endl;
+        lua_pushinteger(L, 0);
+    }
+    
+    return 1;
+}
+
+// names = asset_list_sounds()
+// Returns a table of all sound asset names
+static int lua_asset_list_sounds(lua_State* L) {
+    auto assetMgr = getAssetsManager();
+    if (!assetMgr) {
+        lua_newtable(L);
+        return 1;
+    }
+    
+    auto asset_names = assetMgr->listAssets(SuperTerminal::AssetKind::SOUND);
+    
+    lua_newtable(L);
+    int index = 1;
+    for (const auto& name : asset_names) {
+        lua_pushinteger(L, index++);
+        lua_pushstring(L, name.c_str());
+        lua_settable(L, -3);
+    }
+    
+    return 1;
+}
+
+// info = asset_get_sound_info(asset_name)
+// Returns a table with sound asset metadata
+static int lua_asset_get_sound_info(lua_State* L) {
+    if (lua_gettop(L) != 1) {
+        return luaL_error(L, "asset_get_sound_info() expects 1 argument: asset_name");
+    }
+    
+    const char* asset_name = luaL_checkstring(L, 1);
+    
+    auto assetMgr = getAssetsManager();
+    if (!assetMgr) {
+        lua_pushnil(L);
+        return 1;
+    }
+    
+    SuperTerminal::AssetMetadata metadata;
+    if (!assetMgr->getAssetMetadata(asset_name, metadata)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    
+    // Create info table
+    lua_newtable(L);
+    
+    lua_pushstring(L, "name");
+    lua_pushstring(L, metadata.name.c_str());
+    lua_settable(L, -3);
+    
+    lua_pushstring(L, "description");
+    lua_pushstring(L, metadata.description.c_str());
+    lua_settable(L, -3);
+    
+    lua_pushstring(L, "size");
+    lua_pushinteger(L, metadata.data.size());
+    lua_settable(L, -3);
+    
+    lua_pushstring(L, "compressed");
+    lua_pushboolean(L, metadata.compressed);
+    lua_settable(L, -3);
+    
+    return 1;
+}
+
+// success = asset_remove_sound(asset_name)
+// Removes a sound asset from the database
+static int lua_asset_remove_sound(lua_State* L) {
+    if (lua_gettop(L) != 1) {
+        return luaL_error(L, "asset_remove_sound() expects 1 argument: asset_name");
+    }
+    
+    const char* asset_name = luaL_checkstring(L, 1);
+    
+    auto assetMgr = getAssetsManager();
+    if (!assetMgr) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    
+    bool success = assetMgr->removeAsset(asset_name);
+    
+    if (success) {
+        std::cout << "AssetsLua: Removed sound asset '" << asset_name << "'" << std::endl;
+    } else {
+        std::cerr << "AssetsLua: Failed to remove sound asset '" << asset_name << "'" << std::endl;
+    }
+    
+    lua_pushboolean(L, success);
+    return 1;
+}
+
+// Register all asset Lua bindings
+extern "C" void register_assets_lua_bindings(lua_State* L) {
+    std::cout << "AssetsLua: Registering asset management functions..." << std::endl;
+    
+    // Sound asset management
+    lua_register(L, "asset_save_sound", lua_asset_save_sound);
+    lua_register(L, "asset_save_sound_from_memory", lua_asset_save_sound_from_memory);
+    lua_register(L, "asset_load_sound", lua_asset_load_sound);
+    lua_register(L, "asset_list_sounds", lua_asset_list_sounds);
+    lua_register(L, "asset_get_sound_info", lua_asset_get_sound_info);
+    lua_register(L, "asset_remove_sound", lua_asset_remove_sound);
+    
+    std::cout << "AssetsLua: Asset management functions registered" << std::endl;
+}

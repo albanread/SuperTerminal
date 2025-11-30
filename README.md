@@ -2,6 +2,47 @@
 
 A retro-inspired terminal framework for macOS Apple Silicon that brings 1980s computer graphics capabilities to modern hardware through hardware-accelerated compositing. SuperTerminal provides a complete application framework with LuaJIT as the primary development language and Commodore 64-style text handling.
 
+## 🚀 Quick Start
+
+**New to SuperTerminal? Get up and running in seconds:**
+
+```bash
+make
+```
+
+This builds **SuperTerminal.app** - the interactive development environment with built-in editor, examples, and full GUI. 
+
+**📖 See [QUICK_START.md](QUICK_START.md) for the complete getting started guide.**
+
+### Build Methods
+
+**Using the build script (recommended):**
+```bash
+./build.sh                    # Build SuperTerminal.app (Release)
+./build.sh --debug           # Build in Debug mode
+./build.sh --clean           # Clean and build
+./build.sh framework         # Build only framework
+./build.sh --help            # Show all options
+```
+
+**Using Make:**
+```bash
+make                         # Build app (uses build.sh)
+make run                     # Build and launch app
+make clean                   # Clean build
+make framework               # Build framework only
+make tests                   # Build tests
+```
+
+**Launch methods:**
+```bash
+open build/SuperTerminal.app           # Launch app
+./run_superterminal.sh                 # Auto-build launcher script  
+./run_superterminal.sh hello.lua       # Run with specific script
+```
+
+The app bundle includes everything you need: examples, assets, framework, and XPC services.
+
 ## Overview
 
 SuperTerminal recreates the experience of 1980s computer programming with modern performance. It features a 7-layer Metal-composited graphics system, real-time code editing, and authentic retro aesthetics while leveraging Apple Silicon's unified memory architecture and hardware acceleration.
@@ -15,6 +56,7 @@ SuperTerminal recreates the experience of 1980s computer programming with modern
 - **High-Performance Graphics**: Skia-based 2D graphics with Metal acceleration
 - **Retro Assets**: 128×128 PNG tiles and sprites with smooth scrolling and positioning
 - **Live Coding**: Edit and run Lua code with immediate visual feedback
+- **Retro Startup Sound**: Cool 80s-style boot sequence plays when the app launches 🎵
 
 ## Architecture
 
