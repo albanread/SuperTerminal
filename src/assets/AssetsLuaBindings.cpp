@@ -294,8 +294,8 @@ extern "C" void register_assets_lua_bindings(lua_State* L) {
     std::cout << "AssetsLua: Asset functions registered successfully" << std::endl;
 }
 
-// C API for menu system - Get all asset names
-extern "C" std::vector<std::string> assets_get_all_names() {
+// C++ API for menu system - Get all asset names (called from Objective-C++)
+std::vector<std::string> assets_get_all_names() {
     SuperTerminal::AssetsManager* manager = getAssetsManager();
     if (!manager) {
         return std::vector<std::string>();
@@ -305,8 +305,51 @@ extern "C" std::vector<std::string> assets_get_all_names() {
     return manager->listAllAssets();
 }
 
-// C API for menu system - Delete asset by name
-extern "C" bool assets_delete_by_name(const char* name) {
+// C++ API for menu system - Get detailed asset info (called from Objective-C++)
+struct AssetInfo {
+    std::string name;
+    std::string kind;
+    std::string format;
+    std::string size;
+    int width;
+    int height;
+    std::string created;
+    std::string updated;
+    std::string tags;
+};
+
+std::vector<AssetInfo> assets_get_all_info() {
+    std::vector<AssetInfo> result;
+    
+    SuperTerminal::AssetsManager* manager = getAssetsManager();
+    if (!manager) {
+        return result;
+    }
+    
+    std::vector<std::string> names = manager->listAllAssets();
+    
+    for (const auto& name : names) {
+        SuperTerminal::AssetMetadata metadata;
+        if (manager->getAssetMetadata(name, metadata)) {
+            AssetInfo info;
+            info.name = metadata.name;
+            info.kind = metadata.getKindString();
+            info.format = metadata.getFormatString();
+            info.size = metadata.getDataSizeString();
+            info.width = metadata.width;
+            info.height = metadata.height;
+            info.created = metadata.getCreatedAtString();
+            info.updated = metadata.getUpdatedAtString();
+            info.tags = metadata.getTagsString();
+            result.push_back(info);
+        }
+    }
+    
+    return result;
+}
+
+// C++ API for menu system - Delete asset by name (called from Objective-C++)
+bool assets_delete_by_name(const char* name) {
     if (!name) return false;
     
     SuperTerminal::AssetsManager* manager = getAssetsManager();

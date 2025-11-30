@@ -35,6 +35,19 @@ extern "C" {
 struct lua_State;
 typedef struct lua_State lua_State;
 
+// Asset info structure for C++ asset functions
+struct AssetInfo {
+    std::string name;
+    std::string kind;
+    std::string format;
+    std::string size;
+    int width;
+    int height;
+    std::string created;
+    std::string updated;
+    std::string tags;
+};
+
 // Global function pointer for external run script callback
 typedef void (*run_script_callback_t)();
 run_script_callback_t g_external_run_script_callback = nullptr;
@@ -421,11 +434,11 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
     NSLog(@"Delete Asset menu item selected");
 
     @autoreleasepool {
-        // Get list of all assets
-        extern std::vector<std::string> assets_get_all_names();
-        std::vector<std::string> assetNames = assets_get_all_names();
+        // Get detailed asset information
+        extern std::vector<AssetInfo> assets_get_all_info();
+        std::vector<AssetInfo> assetInfos = assets_get_all_info();
 
-        if (assetNames.empty()) {
+        if (assetInfos.empty()) {
             NSAlert* alert = [[NSAlert alloc] init];
             [alert setMessageText:@"No Assets Found"];
             [alert setInformativeText:@"The assets database is empty."];
@@ -438,32 +451,96 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
         // Create dialog
         NSAlert* alert = [[NSAlert alloc] init];
         [alert setMessageText:@"Delete Asset"];
-        [alert setInformativeText:@"Select an asset to delete from the database:"];
+        [alert setInformativeText:[NSString stringWithFormat:@"Select an asset to delete from the database (%lu assets):", (unsigned long)assetInfos.size()]];
         [alert setAlertStyle:NSAlertStyleWarning];
         [alert addButtonWithTitle:@"Delete"];
         [alert addButtonWithTitle:@"Cancel"];
 
         // Create popup button for asset selection
-        NSPopUpButton* popup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 400, 25) pullsDown:NO];
+        NSPopUpButton* popup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 600, 25) pullsDown:NO];
+        [popup setFont:[NSFont fontWithName:@"Monaco" size:11]];
 
-        // Add assets to popup
-        for (const auto& name : assetNames) {
-            NSString* assetName = [NSString stringWithUTF8String:name.c_str()];
-            [popup addItemWithTitle:assetName];
+        // Store all items for filtering
+        NSMutableArray* allItems = [[NSMutableArray alloc] init];
+
+        // Add assets to popup with detailed info
+        for (const auto& info : assetInfos) {
+            NSString* assetName = [NSString stringWithUTF8String:info.name.c_str()];
+            NSString* kindStr = [NSString stringWithUTF8String:info.kind.c_str()];
+            NSString* formatStr = [NSString stringWithUTF8String:info.format.c_str()];
+            NSString* sizeStr = [NSString stringWithUTF8String:info.size.c_str()];
+
+            // Format: "name - [TYPE/FORMAT] size"
+            NSString* displayText = [NSString stringWithFormat:@"%@ - [%@/%@] %@",
+                                     assetName, kindStr, formatStr, sizeStr];
+
+            NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:displayText action:nil keyEquivalent:@""];
+            [item setRepresentedObject:assetName]; // Store actual name for deletion
+            [[popup menu] addItem:item];
+            [allItems addObject:item];
         }
 
-        // Create container view with popup and info
-        NSView* accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)];
+        // Create search field
+        NSSearchField* searchField = [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 90, 600, 25)];
+        [searchField setPlaceholderString:@"Type to filter assets..."];
 
-        NSTextField* label = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 35, 400, 20)];
+        // Create a block to handle filtering
+        void (^filterAssets)(NSString*) = ^(NSString* searchText) {
+            // Remove all items from popup
+            [popup removeAllItems];
+
+            if (!searchText || [searchText length] == 0) {
+                // No search text, show all items
+                for (NSMenuItem* item in allItems) {
+                    [[popup menu] addItem:[[item copy] autorelease]];
+                }
+            } else {
+                // Filter items based on search text
+                NSString* searchLower = [searchText lowercaseString];
+                for (NSMenuItem* item in allItems) {
+                    NSString* title = [item title];
+                    if ([[title lowercaseString] containsString:searchLower]) {
+                        [[popup menu] addItem:[[item copy] autorelease]];
+                    }
+                }
+            }
+
+            // Select first item if any exist
+            if ([[popup menu] numberOfItems] > 0) {
+                [popup selectItemAtIndex:0];
+            }
+        };
+
+        // Set up search field to trigger filtering on text change
+        [[NSNotificationCenter defaultCenter] addObserverForName:NSControlTextDidChangeNotification
+                                                           object:searchField
+                                                            queue:[NSOperationQueue mainQueue]
+                                                       usingBlock:^(NSNotification *note) {
+            NSTextField* field = [note object];
+            filterAssets([field stringValue]);
+        }];
+
+        // Create container view with search, label and popup
+        NSView* accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 600, 120)];
+
+        NSTextField* searchLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 120, 600, 20)];
+        [searchLabel setStringValue:@"Search:"];
+        [searchLabel setBezeled:NO];
+        [searchLabel setDrawsBackground:NO];
+        [searchLabel setEditable:NO];
+        [searchLabel setSelectable:NO];
+
+        NSTextField* label = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 35, 600, 20)];
         [label setStringValue:@"Asset to delete:"];
         [label setBezeled:NO];
         [label setDrawsBackground:NO];
         [label setEditable:NO];
         [label setSelectable:NO];
 
-        [popup setFrame:NSMakeRect(0, 5, 400, 25)];
+        [popup setFrame:NSMakeRect(0, 5, 600, 25)];
 
+        [accessoryView addSubview:searchLabel];
+        [accessoryView addSubview:searchField];
         [accessoryView addSubview:label];
         [accessoryView addSubview:popup];
 
@@ -473,8 +550,9 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
         NSModalResponse response = [alert runModal];
 
         if (response == NSAlertFirstButtonReturn) {
-            // User clicked Delete
-            NSString* selectedAsset = [popup titleOfSelectedItem];
+            // User clicked Delete - get actual asset name from represented object
+            NSMenuItem* selectedItem = [popup selectedItem];
+            NSString* selectedAsset = [selectedItem representedObject];
             if (selectedAsset && [selectedAsset length] > 0) {
                 // Confirm deletion
                 NSAlert* confirmAlert = [[NSAlert alloc] init];
@@ -1361,8 +1439,16 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
     NSLog(@"Menu: Stop Music");
     editor_set_status("Stopping music...", 180);
 
-    // Stop music
+    // Stop music (legacy system)
     music_stop();
+
+    // Stop ABC XPC music player
+    extern bool abc_client_stop(void);
+    if (abc_client_stop()) {
+        NSLog(@"Menu: ABC music player stopped");
+    } else {
+        NSLog(@"Menu: ABC music player stop failed or not playing");
+    }
 
     // Also stop any running Lua script
     if (lua_gcd_is_script_running()) {
@@ -1478,6 +1564,14 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
 - (IBAction)quitApplication:(id)sender {
     NSLog(@"Menu: Quit Application");
 
+    // Stop music before quitting
+    music_stop();
+
+    // Stop ABC XPC music player
+    extern bool abc_client_stop(void);
+    abc_client_stop();
+    NSLog(@"Menu: Music stopped before quit");
+
     // Stop any running scripts before quitting
     if (lua_gcd_is_script_running()) {
         NSLog(@"Stopping running script before quit...");
@@ -1513,6 +1607,13 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
     NSModalResponse response = [alert runModal];
     if (response == NSAlertFirstButtonReturn) {
         NSLog(@"Force quit confirmed - terminating immediately");
+
+        // Stop music before force quit
+        music_stop();
+        extern bool abc_client_stop(void);
+        abc_client_stop();
+        NSLog(@"Menu: Music stopped before force quit");
+
         superterminal_force_shutdown();
     }
 }
