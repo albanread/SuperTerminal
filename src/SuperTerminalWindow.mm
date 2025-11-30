@@ -177,6 +177,11 @@ extern "C" void macos_clipboard_free_text(char* text) {
 static NSWindow* g_window = nil;
 static MTKView* g_metalView = nil;
 static id<MTLDevice> g_metalDevice = nil;
+
+// Status bar components
+static NSTextField* g_statusLabel = nil;
+static NSTextField* g_cursorLabel = nil;
+static NSTextField* g_scriptLabel = nil;
 static simd_float4 g_backgroundColor = {0.0f, 0.0f, 0.0f, 1.0f};
 
 // Saved video mode for Ctrl+L refresh
@@ -598,8 +603,70 @@ extern "C" {
                                                             device:g_metalDevice];
             [g_metalView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
-            // Set window content view to Metal view
-            [g_window setContentView:g_metalView];
+            // Create container view for Metal view + status bar
+            NSView* containerView = [[NSView alloc] initWithFrame:[[g_window contentView] bounds]];
+            [containerView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+
+            // Create status bar at bottom
+            const CGFloat statusBarHeight = 22.0;
+            NSRect statusBarFrame = NSMakeRect(0, 0, frame.size.width, statusBarHeight);
+            NSView* statusBar = [[NSView alloc] initWithFrame:statusBarFrame];
+            [statusBar setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+            [statusBar setWantsLayer:YES];
+            statusBar.layer.backgroundColor = [[NSColor colorWithWhite:0.2 alpha:1.0] CGColor];
+
+            // Status field (left)
+            NSRect statusLabelFrame = NSMakeRect(8, 2, 150, 18);
+            g_statusLabel = [[NSTextField alloc] initWithFrame:statusLabelFrame];
+            [g_statusLabel setStringValue:@"● Stopped"];
+            [g_statusLabel setBezeled:NO];
+            [g_statusLabel setDrawsBackground:NO];
+            [g_statusLabel setEditable:NO];
+            [g_statusLabel setSelectable:NO];
+            [g_statusLabel setTextColor:[NSColor whiteColor]];
+            [g_statusLabel setFont:[NSFont systemFontOfSize:11]];
+            [g_statusLabel setAutoresizingMask:NSViewMaxXMargin];
+            [statusBar addSubview:g_statusLabel];
+
+            // Cursor position field (center)
+            NSRect cursorLabelFrame = NSMakeRect(frame.size.width/2 - 75, 2, 150, 18);
+            g_cursorLabel = [[NSTextField alloc] initWithFrame:cursorLabelFrame];
+            [g_cursorLabel setStringValue:@"Ln 1, Col 1"];
+            [g_cursorLabel setBezeled:NO];
+            [g_cursorLabel setDrawsBackground:NO];
+            [g_cursorLabel setEditable:NO];
+            [g_cursorLabel setSelectable:NO];
+            [g_cursorLabel setTextColor:[NSColor whiteColor]];
+            [g_cursorLabel setFont:[NSFont systemFontOfSize:11]];
+            [g_cursorLabel setAlignment:NSTextAlignmentCenter];
+            [g_cursorLabel setAutoresizingMask:NSViewMinXMargin | NSViewMaxXMargin];
+            [statusBar addSubview:g_cursorLabel];
+
+            // Script name field (right)
+            NSRect scriptLabelFrame = NSMakeRect(frame.size.width - 308, 2, 300, 18);
+            g_scriptLabel = [[NSTextField alloc] initWithFrame:scriptLabelFrame];
+            [g_scriptLabel setStringValue:@""];
+            [g_scriptLabel setBezeled:NO];
+            [g_scriptLabel setDrawsBackground:NO];
+            [g_scriptLabel setEditable:NO];
+            [g_scriptLabel setSelectable:NO];
+            [g_scriptLabel setTextColor:[NSColor whiteColor]];
+            [g_scriptLabel setFont:[NSFont systemFontOfSize:11]];
+            [g_scriptLabel setAlignment:NSTextAlignmentRight];
+            [g_scriptLabel setAutoresizingMask:NSViewMinXMargin];
+            [statusBar addSubview:g_scriptLabel];
+
+            // Adjust Metal view frame to leave room for status bar
+            NSRect metalFrame = NSMakeRect(0, statusBarHeight, frame.size.width, frame.size.height - statusBarHeight);
+            [g_metalView setFrame:metalFrame];
+            [g_metalView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+
+            // Add views to container
+            [containerView addSubview:statusBar];
+            [containerView addSubview:g_metalView];
+
+            // Set container as window content view
+            [g_window setContentView:containerView];
 
             // Initialize Metal renderer
             metal_renderer_init((__bridge void*)g_metalDevice);
@@ -1347,6 +1414,44 @@ extern "C" {
             }
 
             return nullptr;
+        }
+    }
+
+    // Status bar update functions
+    void superterminal_update_status(const char* status) {
+        @autoreleasepool {
+            if (g_statusLabel && status) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSString* statusString = [NSString stringWithUTF8String:status];
+                    [g_statusLabel setStringValue:statusString];
+                });
+            }
+        }
+    }
+
+    void superterminal_update_cursor_position(int line, int col) {
+        @autoreleasepool {
+            if (g_cursorLabel) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSString* cursorString = [NSString stringWithFormat:@"Ln %d, Col %d", line, col];
+                    [g_cursorLabel setStringValue:cursorString];
+                });
+            }
+        }
+    }
+
+    void superterminal_update_script_name(const char* scriptName) {
+        @autoreleasepool {
+            if (g_scriptLabel) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (scriptName && strlen(scriptName) > 0) {
+                        NSString* scriptString = [NSString stringWithUTF8String:scriptName];
+                        [g_scriptLabel setStringValue:scriptString];
+                    } else {
+                        [g_scriptLabel setStringValue:@""];
+                    }
+                });
+            }
         }
     }
 
