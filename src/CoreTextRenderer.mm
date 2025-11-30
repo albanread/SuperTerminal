@@ -1104,7 +1104,7 @@ struct GlyphCacheEntry {
                 // Adjust Y to align with cell top (same as paper background)
                 float baseY = screenY + self.baseline - self.maxGlyphHeight;
 
-                simd_float2 gridPosition = simd_make_float2(x, y);
+                simd_float2 gridPosition = simd_make_float2(x, screenY_idx);
 
                 // Render 6 sub-pixels based on bit pattern
                 for (int row = 0; row < 3; row++) {
@@ -1144,11 +1144,11 @@ struct GlyphCacheEntry {
             }
 
             // Debug first character rendering
-            if (x == 0 && y == startRow && cell->character != 0) {
+            if (x == 0 && screenY_idx == startRow && cell->character != 0) {
                 FILE *debugFile = fopen("/tmp/superterminal_debug.log", "a");
                 if (debugFile) {
                     fprintf(debugFile, "\n=== FIRST CHAR RENDER DEBUG ===\n");
-                    fprintf(debugFile, "CHAR: '%c' at grid (%d,%d)\n", cell->character, x, y);
+                    fprintf(debugFile, "CHAR: '%c' at grid (%d,%d)\n", cell->character, x, screenY_idx);
                     fprintf(debugFile, "SCREEN POS: (%.1f,%.1f)\n", screenX, screenY);
                     fprintf(debugFile, "CELL SIZE: %.1fx%.1f\n", self.charWidth, self.charHeight);
                     fprintf(debugFile, "VIEWPORT: %.0fx%.0f pixels\n", viewport.width, viewport.height);
@@ -1199,7 +1199,7 @@ struct GlyphCacheEntry {
                 float bgY = screenY + self.baseline - self.maxGlyphHeight;
                 float bgHeight = self.charHeight;
 
-                simd_float2 gridPosition = simd_make_float2(x, y);
+                simd_float2 gridPosition = simd_make_float2(x, screenY_idx);
                 struct TextVertex bgQuad[6] = {
                     {{screenX, bgY}, {0, 0}, cell->inkColor, bgPaperColor, cell->character, gridPosition},
                     {{screenX + self.charWidth, bgY}, {0, 0}, cell->inkColor, bgPaperColor, cell->character, gridPosition},
@@ -1273,7 +1273,7 @@ struct GlyphCacheEntry {
             static int debugCount = 0;
             if (debugCount < 10) {
                 printf("[VERTEX DEBUG] Char '%c' at grid (%d,%d) - gridPos=(%.0f,%.0f)\n",
-                       (char)cell->character, x, y, gridPosition.x, gridPosition.y);
+                       (char)cell->character, x, screenY_idx, gridPosition.x, gridPosition.y);
                 debugCount++;
                 fflush(stdout);
             }
@@ -2742,124 +2742,124 @@ extern "C" {
             }
         }
 
-        // Scrollback buffer C API functions
-        void text_locate_line(int line) {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer locateLine:line];
-                }
-            }
-        }
-
-        void text_scroll_to_line(int line) {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer scrollToLine:line];
-                }
-            }
-        }
-
-        void text_scroll_up(int lines) {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer scrollUp:lines];
-                }
-            }
-        }
-
-        void text_scroll_down(int lines) {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer scrollDown:lines];
-                }
-            }
-        }
-
-        void text_page_up() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer pageUp];
-                }
-            }
-        }
-
-        void text_page_down() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer pageDown];
-                }
-            }
-        }
-
-        void text_scroll_to_top() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer scrollToTop];
-                }
-            }
-        }
-
-        void text_scroll_to_bottom() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer scrollToBottom];
-                }
-            }
-        }
-
-        int text_get_cursor_line() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    return [g_terminalTextLayer getCursorLine];
-                }
-                return 0;
-            }
-        }
-
-        int text_get_cursor_column() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    return [g_terminalTextLayer getCursorColumn];
-                }
-                return 0;
-            }
-        }
-
-        int text_get_viewport_line() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    return [g_terminalTextLayer getViewportLine];
-                }
-                return 0;
-            }
-        }
-
-        int text_get_viewport_height() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    return [g_terminalTextLayer getViewportHeight];
-                }
-                return 60;
-            }
-        }
-
-        void text_set_autoscroll(bool enabled) {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    [g_terminalTextLayer setAutoScroll:enabled ? YES : NO];
-                }
-            }
-        }
-
-        bool text_get_autoscroll() {
-            @autoreleasepool {
-                if (g_terminalTextLayer) {
-                    return [g_terminalTextLayer getAutoScroll] ? true : false;
-                }
-                return true;
+    // Scrollback buffer C API functions
+    void text_locate_line(int line) {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer locateLine:line];
             }
         }
     }
+
+    void text_scroll_to_line(int line) {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer scrollToLine:line];
+            }
+        }
+    }
+
+    void text_scroll_up(int lines) {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer scrollUp:lines];
+            }
+        }
+    }
+
+    void text_scroll_down(int lines) {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer scrollDown:lines];
+            }
+        }
+    }
+
+    void text_page_up() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer pageUp];
+            }
+        }
+    }
+
+    void text_page_down() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer pageDown];
+            }
+        }
+    }
+
+    void text_scroll_to_top() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer scrollToTop];
+            }
+        }
+    }
+
+    void text_scroll_to_bottom() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer scrollToBottom];
+            }
+        }
+    }
+
+    int text_get_cursor_line() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                return [g_terminalTextLayer getCursorLine];
+            }
+            return 0;
+        }
+    }
+
+    int text_get_cursor_column() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                return [g_terminalTextLayer getCursorColumn];
+            }
+            return 0;
+        }
+    }
+
+    int text_get_viewport_line() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                return [g_terminalTextLayer getViewportLine];
+            }
+            return 0;
+        }
+    }
+
+    int text_get_viewport_height() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                return [g_terminalTextLayer getViewportHeight];
+            }
+            return 60;
+        }
+    }
+
+    void text_set_autoscroll(bool enabled) {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                [g_terminalTextLayer setAutoScroll:enabled ? YES : NO];
+            }
+        }
+    }
+
+    bool text_get_autoscroll() {
+        @autoreleasepool {
+            if (g_terminalTextLayer) {
+                return [g_terminalTextLayer getAutoScroll] ? true : false;
+            }
+            return true;
+        }
+    }
+}
 
     // Clear all chunky pixels (set all cells to empty sextant pattern)
     void chunky_clear(void) {

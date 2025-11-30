@@ -291,5 +291,28 @@ extern "C" void register_assets_lua_bindings(lua_State* L) {
     lua_register(L, "asset_get_sound_info", lua_asset_get_sound_info);
     lua_register(L, "asset_remove_sound", lua_asset_remove_sound);
     
-    std::cout << "AssetsLua: Asset management functions registered" << std::endl;
+    std::cout << "AssetsLua: Asset functions registered successfully" << std::endl;
+}
+
+// C API for menu system - Get all asset names
+extern "C" std::vector<std::string> assets_get_all_names() {
+    SuperTerminal::AssetsManager* manager = getAssetsManager();
+    if (!manager) {
+        return std::vector<std::string>();
+    }
+    
+    // Get all asset names from manager
+    return manager->listAllAssets();
+}
+
+// C API for menu system - Delete asset by name
+extern "C" bool assets_delete_by_name(const char* name) {
+    if (!name) return false;
+    
+    SuperTerminal::AssetsManager* manager = getAssetsManager();
+    if (!manager) {
+        return false;
+    }
+    
+    return manager->removeAsset(std::string(name));
 }

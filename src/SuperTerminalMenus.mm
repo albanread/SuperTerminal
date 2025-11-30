@@ -417,6 +417,106 @@ static SuperTerminalMenuDelegate* g_menuDelegate = nil;
 
 @implementation SuperTerminalMenuActions
 
+- (void)deleteAsset:(id)sender {
+    NSLog(@"Delete Asset menu item selected");
+
+    @autoreleasepool {
+        // Get list of all assets
+        extern std::vector<std::string> assets_get_all_names();
+        std::vector<std::string> assetNames = assets_get_all_names();
+
+        if (assetNames.empty()) {
+            NSAlert* alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"No Assets Found"];
+            [alert setInformativeText:@"The assets database is empty."];
+            [alert setAlertStyle:NSAlertStyleInformational];
+            [alert addButtonWithTitle:@"OK"];
+            [alert runModal];
+            return;
+        }
+
+        // Create dialog
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Delete Asset"];
+        [alert setInformativeText:@"Select an asset to delete from the database:"];
+        [alert setAlertStyle:NSAlertStyleWarning];
+        [alert addButtonWithTitle:@"Delete"];
+        [alert addButtonWithTitle:@"Cancel"];
+
+        // Create popup button for asset selection
+        NSPopUpButton* popup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 400, 25) pullsDown:NO];
+
+        // Add assets to popup
+        for (const auto& name : assetNames) {
+            NSString* assetName = [NSString stringWithUTF8String:name.c_str()];
+            [popup addItemWithTitle:assetName];
+        }
+
+        // Create container view with popup and info
+        NSView* accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)];
+
+        NSTextField* label = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 35, 400, 20)];
+        [label setStringValue:@"Asset to delete:"];
+        [label setBezeled:NO];
+        [label setDrawsBackground:NO];
+        [label setEditable:NO];
+        [label setSelectable:NO];
+
+        [popup setFrame:NSMakeRect(0, 5, 400, 25)];
+
+        [accessoryView addSubview:label];
+        [accessoryView addSubview:popup];
+
+        [alert setAccessoryView:accessoryView];
+
+        // Show dialog
+        NSModalResponse response = [alert runModal];
+
+        if (response == NSAlertFirstButtonReturn) {
+            // User clicked Delete
+            NSString* selectedAsset = [popup titleOfSelectedItem];
+            if (selectedAsset && [selectedAsset length] > 0) {
+                // Confirm deletion
+                NSAlert* confirmAlert = [[NSAlert alloc] init];
+                [confirmAlert setMessageText:@"Confirm Deletion"];
+                [confirmAlert setInformativeText:[NSString stringWithFormat:@"Are you sure you want to permanently delete '%@'?\n\nThis action cannot be undone.", selectedAsset]];
+                [confirmAlert setAlertStyle:NSAlertStyleCritical];
+                [confirmAlert addButtonWithTitle:@"Delete"];
+                [confirmAlert addButtonWithTitle:@"Cancel"];
+
+                NSModalResponse confirmResponse = [confirmAlert runModal];
+
+                if (confirmResponse == NSAlertFirstButtonReturn) {
+                    // Perform deletion
+                    extern bool assets_delete_by_name(const char* name);
+                    const char* assetNameC = [selectedAsset UTF8String];
+                    bool success = assets_delete_by_name(assetNameC);
+
+                    if (success) {
+                        NSAlert* successAlert = [[NSAlert alloc] init];
+                        [successAlert setMessageText:@"Asset Deleted"];
+                        [successAlert setInformativeText:[NSString stringWithFormat:@"'%@' has been deleted from the database.", selectedAsset]];
+                        [successAlert setAlertStyle:NSAlertStyleInformational];
+                        [successAlert addButtonWithTitle:@"OK"];
+                        [successAlert runModal];
+
+                        NSLog(@"Successfully deleted asset: %@", selectedAsset);
+                    } else {
+                        NSAlert* errorAlert = [[NSAlert alloc] init];
+                        [errorAlert setMessageText:@"Deletion Failed"];
+                        [errorAlert setInformativeText:[NSString stringWithFormat:@"Failed to delete '%@' from the database.", selectedAsset]];
+                        [errorAlert setAlertStyle:NSAlertStyleCritical];
+                        [errorAlert addButtonWithTitle:@"OK"];
+                        [errorAlert runModal];
+
+                        NSLog(@"Failed to delete asset: %@", selectedAsset);
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 
 - (IBAction)saveFile:(id)sender {
@@ -1676,6 +1776,12 @@ void superterminal_create_menu_bar() {
                                                        keyEquivalent:@"B"];
         [browseAssetsItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagOption];
         [browseAssetsItem setTarget:g_menuActions];
+
+        NSMenuItem* deleteAssetItem = [assetsMenu addItemWithTitle:@"Delete Asset..."
+                                                            action:@selector(deleteAsset:)
+                                                     keyEquivalent:@"D"];
+        [deleteAssetItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagOption];
+        [deleteAssetItem setTarget:g_menuActions];
 
         [assetsMenuItem setSubmenu:assetsMenu];
         [g_mainMenuBar addItem:assetsMenuItem];
