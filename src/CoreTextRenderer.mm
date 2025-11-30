@@ -157,14 +157,19 @@ struct GlyphCacheEntry {
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device isEditorLayer:(BOOL)isEditor {
+    NSLog(@"CoreText: initWithDevice called, isEditor=%d", isEditor);
     self = [super init];
     if (self) {
+        NSLog(@"CoreText: Setting device and properties");
         self.device = device;
         self.isEditorLayer = isEditor;
 
         // Initialize text grid with 2000-line scrollback buffer
+        NSLog(@"CoreText: Allocating text grid (%d x %d = %d cells)", BUFFER_WIDTH, BUFFER_HEIGHT, BUFFER_WIDTH * BUFFER_HEIGHT);
         self.textGrid = (struct TextCell*)calloc(BUFFER_WIDTH * BUFFER_HEIGHT, sizeof(struct TextCell));
+        NSLog(@"CoreText: Text grid allocated at %p", self.textGrid);
 
+        NSLog(@"CoreText: Initializing viewport settings");
         // Initialize viewport (default: render all rows)
         self.viewportStartRow = 0;
         self.viewportRowCount = GRID_HEIGHT;
@@ -178,6 +183,7 @@ struct GlyphCacheEntry {
         self.layoutOffsetX = 0.0f;
         self.layoutOffsetY = 0.0f;
 
+        NSLog(@"CoreText: Initializing cursor and colors");
         // Initialize cursor and colors based on layer type
         self.cursorX = 0;
         self.cursorY = 0;
@@ -206,6 +212,7 @@ struct GlyphCacheEntry {
         self.atlasY = 0;
         self.atlasRowHeight = 0;
 
+        NSLog(@"CoreText: Initializing glyph cache and atlas");
         // Initialize glyph cache
         self.glyphCache = [NSMutableDictionary dictionary];
 
@@ -213,7 +220,9 @@ struct GlyphCacheEntry {
         self.atlasData = [NSMutableData dataWithLength:self.atlasWidth * self.atlasHeight];
         memset([self.atlasData mutableBytes], 0, self.atlasWidth * self.atlasHeight);
 
+        NSLog(@"CoreText: Calling clear method");
         [self clear];
+        NSLog(@"CoreText: initWithDevice completed successfully");
     }
     return self;
 }
@@ -952,20 +961,25 @@ struct GlyphCacheEntry {
 }
 
 - (void)clear {
+    NSLog(@"CoreText: clear called");
     // For terminal layer (not editor), always use transparent paper on clear
     // This keeps layer 5 transparent by default so other layers are visible
     simd_float4 clearPaper = self.isEditorLayer ? self.currentPaper : simd_make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     // Performance: Zero out entire buffer efficiently
+    NSLog(@"CoreText: Zeroing buffer with memset");
     memset(self.textGrid, 0, BUFFER_WIDTH * BUFFER_HEIGHT * sizeof(struct TextCell));
+    NSLog(@"CoreText: Buffer zeroed");
 
     // Only initialize visible viewport with spaces (for rendering)
     int visibleCells = BUFFER_WIDTH * (self.viewportHeight > 0 ? self.viewportHeight : 60);
+    NSLog(@"CoreText: Initializing %d visible cells", visibleCells);
     for (int i = 0; i < visibleCells; i++) {
         self.textGrid[i].character = ' ';
         self.textGrid[i].inkColor = self.currentInk;
         self.textGrid[i].paperColor = clearPaper;
     }
+    NSLog(@"CoreText: Visible cells initialized");
 
     self.cursorX = 0;
     self.cursorY = 0;
@@ -973,6 +987,7 @@ struct GlyphCacheEntry {
     // Reset viewport to top
     self.viewportStartLine = 0;
 
+    NSLog(@"CoreText: Saving cursor state");
     // Save cursor position to layer-specific state
     if (self.isEditorLayer) {
         g_editor_state.cursorX = 0;
@@ -981,6 +996,7 @@ struct GlyphCacheEntry {
         g_terminal_state.cursorX = 0;
         g_terminal_state.cursorY = 0;
     }
+    NSLog(@"CoreText: clear completed");
 }
 
 - (void)home {
@@ -1462,11 +1478,11 @@ struct GlyphCacheEntry {
 }
 
 - (void)setAutoScroll:(BOOL)enabled {
-    self.autoScroll = enabled;
+    _autoScroll = enabled;
 }
 
 - (BOOL)getAutoScroll {
-    return self.autoScroll;
+    return _autoScroll;
 }
 
 @end
@@ -1770,10 +1786,12 @@ extern "C" {
             // Create terminal layer (Layer 5)
             NSLog(@"CoreText: Creating terminal text layer...");
             g_terminalTextLayer = [[CoreTextLayer alloc] initWithDevice:metalDevice isEditorLayer:NO];
+            NSLog(@"CoreText: Terminal text layer created successfully: %p", g_terminalTextLayer);
 
             // Create editor layer (Layer 6)
             NSLog(@"CoreText: Creating editor text layer...");
             g_editorTextLayer = [[CoreTextLayer alloc] initWithDevice:metalDevice isEditorLayer:YES];
+            NSLog(@"CoreText: Editor text layer created successfully: %p", g_editorTextLayer);
 
             // Search for font file
             NSLog(@"CoreText: Searching for font file...");
@@ -2741,6 +2759,7 @@ extern "C" {
                 fclose(debugFile);
             }
         }
+    }
 
     // Scrollback buffer C API functions
     void text_locate_line(int line) {
@@ -2859,7 +2878,6 @@ extern "C" {
             return true;
         }
     }
-}
 
     // Clear all chunky pixels (set all cells to empty sextant pattern)
     void chunky_clear(void) {
